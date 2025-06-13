@@ -1,56 +1,57 @@
-import os
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes, CommandHandler
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
+# آیدی عددی شما (ادمین)
+ADMIN_ID = 455102383  # ← آی‌دی عددی خودت رو اینجا بذار
 
-user_map = {}
+# دیکشنری برای نگه‌داشتن ارتباط بین پیام‌ها و کاربرا
+user_message_map = {}
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! پیام، ویس یا عکست رو بفرست تا ناشناس برای مدیر ارسال بشه.")
-
+# هندل پیام کاربران
 async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user
-    user_id = user.id
-    user_map[user_id] = user.first_name or "ناشناس"
+    user = update.effective_user
+    message = update.effective_message
+    text = message.text or "(متن ندارد)"
+    
+    # ذخیره آی‌دی کاربر و پیام
+    user_message_map[message.message_id] = user.id
 
-    if update.message.text:
-        text = update.message.text
-        await context.bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=f"📩 پیام از کاربر ناشناس (ID: {user_id}):\n{text}\n\n/reply {user_id} پاسخ"
-        )
-        await update.message.reply_text("✅ پیام متنی شما ناشناس ارسال شد.")
-    elif update.message.voice or update.message.photo or update.message.document:
-        await context.bot.forward_message(chat_id=ADMIN_CHAT_ID, from_chat_id=user_id, message_id=update.message.message_id)
-        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"(رسانه‌ای از کاربر ناشناس - ID: {user_id})\n/reply {user_id} پاسخ")
-        await update.message.reply_text("✅ پیام شما ناشناس ارسال شد.")
-    else:
-        await update.message.reply_text("❗️این نوع پیام پشتیبانی نمی‌شود.")
+    # فوروارد به ادمین با آیدی و نام
+    forward_text = f"📩 پیام جدید از @{user.username or 'بی‌نام'} (ID: {user.id}):\n\n{text}"
+    await context.bot.send_message(chat_id=ADMIN_ID, text=forward_text)
 
-async def reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_CHAT_ID:
-        await update.message.reply_text("⛔️ فقط مدیر می‌تواند پاسخ دهد.")
-        return
+# هندل پاسخ ادمین به کاربران
+async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    reply = message.reply_to_message
 
-    args = context.args
-    if len(args) < 2:
-        await update.message.reply_text("❗️فرمت: /reply user_id پیام شما")
-        return
+    # چک کنیم پیام پاسخ به کدوم کاربره
+    if reply and "ID:" in reply.text:
+        try:
+            user_id_line = [line for line in reply.text.split('\n') if "ID:" in line][0]
+            user_id = int(user_id_line.split("ID:")[1].strip().replace(")", "").replace(":", ""))
+            await context.bot.send_message(chat_id=user_id, text=message.text)
+            await context.bot.send_message(chat_id=ADMIN_ID, text="✅ پیام برای کاربر ارسال شد.")
+        except Exception as e:
+            await context.bot.send_message(chat_id=ADMIN_ID, text=f"❌ خطا در ارسال پیام: {e}")
 
-    user_id = int(args[0])
-    message_text = " ".join(args[1:])
-    try:
-        await context.bot.send_message(chat_id=user_id, text=f"📬 پاسخ مدیر:\n{message_text}")
-        await update.message.reply_text("✅ پیام ارسال شد.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ خطا: {e}")
+# راه‌اندازی ربات
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("سلام! پیام‌تو بفرست، ادمین جواب می‌ده 🙂")
 
-if __name__ == '__main__':
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+def main():
+    app = ApplicationBuilder().token("7921760794:AAGcot2bVBiiM012GMk6exNFZ7lTiOO_44E").build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("reply", reply_command))
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_user_message))
-    print("🤖 Bot is running...")
+    
+    # پیام‌های دریافتی از همه کاربران
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.User(user_id=ADMIN_ID), handle_user_message))
+    
+    # پیام‌های ادمین که به کاربر reply زده
+    app.add_handler(MessageHandler(filters.TEXT & filters.User(user_id=ADMIN_ID), handle_admin_reply))
+
+    print("ربات فعال شد.")
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
